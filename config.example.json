@@ -1,0 +1,9 @@
+{
+  "dailyDir": "daily",
+  "weeklyDir": "weekly",
+  "planPath": "learning/plan.md",
+  "xhsDir": "xiaohongshu",
+  "todoPath": "To-do & inspiration.md",
+  "dailyTemplate": "templates/daily.md",
+  "weeklyTemplate": "templates/weekly.md"
+}

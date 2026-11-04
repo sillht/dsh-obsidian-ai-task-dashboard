@@ -1,0 +1,7 @@
+# 个人设置：真实 vault 路径和读者介绍，只留在本机
+config.json
+news/persona.md
+.DS_Store
+
+# 演示 vault 是 demo/make-demo.mjs 生成的，不提交
+demo-vault/

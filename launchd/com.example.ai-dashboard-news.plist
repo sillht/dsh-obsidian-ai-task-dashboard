@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 每天 8:30 跑一次资讯抓取。Mac 睡眠时错过的，唤醒后会补跑一次；关机错过就不跑（看板打开时会自动补）。
+     把 __HOME__ 换成你的用户目录（如 /Users/yourname），__VAULT__ 换成 vault 的完整路径，
+     node 路径按 `which node` 的结果改。安装和卸载见 README。 -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.example.ai-dashboard-news</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>__VAULT__/_dashboard/news/fetch.mjs</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd 不读 .zshrc，要写明 node 和 claude 所在的目录 -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin</string>
+  </dict>
+  <key>WorkingDirectory</key><string>__HOME__/.secondbrain-news</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+  <!-- 脚本自己写 run.log（只留最后 200 行），这里不另开日志，免得越积越大 -->
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
+</dict>
+</plist>
