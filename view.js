@@ -16,9 +16,11 @@ const V = {
   finishedDays: 30,
   ideasMax: 4,
   narrowBelow: 760,
+  news: true, // 资讯卡要用已登录的 Claude Code 做总结；用不上就在 config.json 里写 "news": false，整张卡和后台抓取都关掉
   row3: 640, // 第三行（资讯卡 + 番茄钟）的高度；前两行仍然撑满一屏，第三行往下滚才看到
 };
 try { Object.assign(V, JSON.parse(await app.vault.adapter.read(`${V.dir || "_dashboard"}/config.json`))); } catch (e) { /* 没有 config.json 就用缺省值 */ }
+if (V.news === false) V.row3 = 440; // 没有资讯卡，第三行只剩番茄钟，压矮（和 view.css 的 .no-news 对应）
 const baseName = p => String(p).split("/").pop().replace(/\.md$/, "");
 
 // ---------- 小工具 ----------
@@ -270,7 +272,7 @@ function glyphField(seed = 11) {
 
 function renderList(items, cls, fallbackPath, maxLen = 60) {
   return `<ul class="list ${cls}">${items.map(t =>
-    `<li class="${t.done ? "done" : "todo"}" data-open="${esc(t.path || fallbackPath)}" data-line="${t.line}"><span class="box" data-toggle title="${t.done ? "改回未完成" : "标记完成"}"></span><span class="txt">${esc(cut(plain(t.text), maxLen))}</span></li>`
+    `<li class="${t.done ? "done" : "todo"}" data-open="${esc(t.path || fallbackPath)}" data-line="${t.line}" data-text="${esc(String(t.text).split("\n")[0].trim())}"><span class="box" data-toggle title="${t.done ? "改回未完成" : "标记完成"}"></span><span class="txt">${esc(cut(plain(t.text), maxLen))}</span></li>`
   ).join("")}</ul>`;
 }
 
@@ -455,8 +457,12 @@ function cardNews(D) {
   const N = D.news, t = N.t || {};
   const tools = `<span class="tools"><button class="tb" data-act="news-refresh" title="现在就更新（约 1 分钟）">↻</button><button class="tb" data-act="expand" title="展开">${SVG_EXPAND}</button><button class="tb" data-act="more" title="更多">⋯</button></span>`;
   const empty = msg => `<div class="muted">${msg}</div>`;
+  // 没抓成功过时把原因直接写在卡上（不只是鼠标悬停才看得到）；没装 Claude Code 是最常见的一种，单独说怎么办
+  const fail = t.lastError ? (/找不到 claude/.test(t.lastError.message)
+    ? `这张卡要用已登录的 Claude Code 做总结，这台电脑上没找到 claude 命令。用不上这张卡的话，在 _dashboard/config.json 里写 "news": false 把它关掉`
+    : `上次更新失败：${esc(t.lastError.message)}`) : "";
   const heads = (t.headlines || []).length ? `<ol class="heads">${t.headlines.map((h, k) => headItem(t, h, k, false)).join("")}</ol>`
-    : empty(N.running ? "正在第一次抓取，大约 1 分钟" : "还没有数据。点右上角 ↻ 抓一次");
+    : empty(N.running ? "正在第一次抓取，大约 1 分钟" : fail || "还没有数据。点右上角 ↻ 抓一次（要用已登录的 Claude Code，大约 1 分钟）");
   const yt = (t.youtube || []).map(v => ytItem(D, v, false)).join("");
   const xs = ((t.x && t.x.topics) || []).map(x => xItem(D, x, false)).join("");
   const pods = (t.podcasts || []).filter(p => p.gist).map(p => `<li class="ni pod" data-url="${esc(p.url)}"><div class="nb"><div class="nt">${esc(p.title_zh || p.title)}${marks(p)}</div><div class="nm">播客 · ${esc(p.name)}</div></div></li>`).join("");
@@ -515,7 +521,7 @@ function runNews(root) {
   // 演示库（config.json 里 newsReadOnly: true）只显示资讯、不更新，免得用演示版读者介绍覆盖真实数据
   if (V.newsReadOnly) { if (typeof Notice === "function") new Notice("这个库只显示资讯，不更新"); return; }
   const node = NODE_BIN(), base = app.vault.adapter.basePath;
-  if (!node || !base) { console.warn("[sb-board] 找不到 node 或 vault 路径，没法更新资讯"); return; }
+  if (!node || !base) { new Notice("没找到 node，没法更新资讯（要装在 /opt/homebrew/bin 或 /usr/local/bin）"); return; }
   const home = window.require("os").homedir();
   const p = window.require("child_process").spawn(node, [`${base}/_dashboard/news/fetch.mjs`], {
     cwd: base, stdio: "ignore", env: { ...window.process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${home}/.local/bin` } });
@@ -525,6 +531,7 @@ function runNews(root) {
 }
 // 盯着数据文件夹：定时任务或刷新按钮写完 today.json，看板自己重画（只装一个监视器，代码更新后换新的）
 function watchNews() {
+  if (V.news === false) return;
   try {
     const fs = window.require("fs"), dir = NEWS_DIR();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -539,8 +546,9 @@ function watchNews() {
 // 数据不是今天的、已经过了 8:30、没在跑：自动补跑一次（Mac 关机错过定时任务时）。同一天只试一次
 function maybeAutoNews(root, N) {
   const now = new Date(), day = ymd(TODAY);
-  if (V.newsReadOnly || N.running || (N.t && N.t.date === day) || window.__sbNewsAuto === day) return;
-  if (N.t && now.getHours() * 60 + now.getMinutes() < 8 * 60 + 30) return;
+  // 一次都没抓过（新装的）不自动跑：第一次要自己点 ↻，免得一打开看板就替人花一次 Claude 用量
+  if (V.news === false || V.newsReadOnly || !N.t || N.running || N.t.date === day || window.__sbNewsAuto === day) return;
+  if (now.getHours() * 60 + now.getMinutes() < 8 * 60 + 30) return;
   window.__sbNewsAuto = day;
   runNews(root);
 }
@@ -618,7 +626,7 @@ function cardPomo() {
     <span class="tag">07 · pomodoro</span></section>`;
 }
 
-const renderAll = D => cardToday(D) + cardXhs(D) + cardRoute(D) + cardWeek(D) + cardIdeas(D) + cardNews(D) + cardPomo();
+const renderAll = D => cardToday(D) + cardXhs(D) + cardRoute(D) + cardWeek(D) + cardIdeas(D) + (V.news === false ? "" : cardNews(D)) + cardPomo();
 
 // ---------- 字体：把 fonts/*.css 里的相对 url 换成 Obsidian 资源路径 ----------
 async function ensureFonts() {
@@ -660,17 +668,25 @@ async function openAt(root, path, line) {
 }
 
 // ---------- 三种写入 ----------
-async function toggleTask(path, line) {
+async function toggleTask(path, line, text) {
   const f = tfile(path); if (!isFile(f)) return;
+  const want = String(text || "").trim();
+  let missed = false;
   await app.vault.process(f, data => {
     const lines = data.split("\n");
-    const l = lines[line]; if (l == null) return data;
-    const m = l.match(/^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])\]/);
-    if (!m) return data;
-    const wasDone = /x/i.test(m[2]);
-    lines[line] = l.slice(0, m[1].length) + (wasDone ? " " : "x") + l.slice(m[1].length + 1);
+    const box = l => (l || "").match(/^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])\]\s*(.*)$/);
+    const same = m => !want || m[3].trim() === want;
+    // 看板画好之后笔记可能被改过（自己加了一行、agent 插了一行），行号会错位：先核对这一行是不是那条任务，不是就按文字找，找不到唯一的一条就不动
+    let i = line, m = box(lines[i]);
+    if (!m || !same(m)) {
+      const hits = lines.map((l, k) => [k, box(l)]).filter(([, x]) => x && same(x));
+      if (hits.length !== 1) { missed = true; return data; }
+      [i, m] = hits[0];
+    }
+    lines[i] = lines[i].slice(0, m[1].length) + (/x/i.test(m[2]) ? " " : "x") + lines[i].slice(m[1].length + 1);
     return lines.join("\n");
   });
+  if (missed) { new Notice("这篇笔记刚被改过，没找到这条任务，没有改动。等看板刷新后再点一次"); try { dv.index.touch(); } catch (e) { /* 忽略 */ } }
 }
 // 三种输入框：idea → To-do 文件末尾；today → 今天 daily 的「今日」；week → 本周 weekly 的「本周要完成」
 const JOT_META = {
@@ -1164,7 +1180,7 @@ function onClick(root, D, e) {
       const li = box.closest("[data-open]");
       li.classList.toggle("done"); li.classList.toggle("todo");
       afterTick(root, D, li);
-      return toggleTask(li.dataset.open, +li.dataset.line);
+      return toggleTask(li.dataset.open, +li.dataset.line, li.dataset.text);
     }
     // 资讯条目：在系统浏览器里打开（不进 Obsidian 的网页标签）
     const u = e.target.closest("[data-url]");
@@ -1241,7 +1257,7 @@ async function main() {
   if (ensureReadingView(dv.container)) return; // 切视图后 Dataview 会在阅读视图里重新跑一遍这个脚本
   await ensureFonts();
   const fresh = document.createElement("div");
-  fresh.className = "sb-board";
+  fresh.className = V.news === false ? "sb-board no-news" : "sb-board";
   fresh.innerHTML = renderAll(D);
   // 代码版本戳：view.js / view.css 改过之后，旧看板上绑的还是旧代码的处理函数，这时不能修补复用，必须整块换新
   const ver = ["view.js", "view.css"].map(n => { const f = tfile(`${V.dir || "_dashboard"}/${n}`); return f && f.stat ? f.stat.mtime : 0; }).join("-");

@@ -317,6 +317,8 @@ async function main() {
   let today;
   try {
     log(`开始；数据目录 ${DIR}，上限 ${CAP} 字节`);
+    // 没有 claude 就先停，不去白抓一遍网页（看板会把这句原因显示在卡上）
+    if (!ARGS.has("--no-llm") && !findClaude()) throw new Error("找不到 claude 命令");
     const [yt, fb, hn] = await Promise.all([fetchYouTube(prev), fetchFollowBuilders(prev), fetchHN(prev)]);
     if (!yt.list.length && !fb.x && !hn.list.length && yt.ok === 0) throw new Error("所有来源都没抓到（可能断网了）");
     const xNew = fb.x && !fb.x.reuse;

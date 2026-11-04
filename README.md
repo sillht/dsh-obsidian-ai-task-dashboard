@@ -6,7 +6,7 @@
 
 <sub>截图里的待办、计划、灵感都是演示数据（`demo/make-demo.mjs` 生成）；资讯卡是真实的当天内容。</sub>
 
-> 这是我自己的版本，按我的 vault 结构写的，放出来给大家参考。可以拿去改，但我不保证能在你的电脑上直接跑起来，也没法逐个答疑。
+> **这是一份参考实现，不是装上就能用的插件。** 它按我自己的 vault 结构和习惯写，放出来是给大家看看这样一个看板是怎么做的：数据从哪读、卡片怎么画、资讯怎么自动整理、怎么不在电脑上越堆越多。可以读代码、拿思路，也可以自己改着用，但我不保证它在你的电脑上能直接跑起来，也没法逐个答疑。
 
 ## 先看效果：生成一个演示 vault
 
@@ -29,7 +29,7 @@ node demo/make-demo.mjs
 | AI 学习路线 | 一份按「第 N 周 · 标题」分段的学习计划，显示当前在第几站、总进度 |
 | 本周要完成 | 学习计划里当前这一块没勾的条目，加上 `weekly/` 里自己加的 |
 | 灵感收件箱 | 灵感文件末尾的几段，可以在卡上记一笔 |
-| 今天 AI 圈 | 每天 8:30 自动整理的 AI 资讯（下面细说） |
+| 今天 AI 圈 | 每天 8:30 自动整理的 AI 资讯（下面细说）。**只有这张卡需要 Claude Code**，其余卡只靠 Obsidian + Dataview |
 | 番茄钟 | 25 分钟专注 / 5 分钟休息，到点系统通知 |
 
 所有卡的内容都是打开看板时从你的笔记里现读的，代码里不存任何个人内容。
@@ -90,7 +90,9 @@ node demo/make-demo.mjs
 
 我在自己电脑上完整跑过一次，扫描了运行期间整个用户目录新增的文件，确认没有会累积的东西。
 
-## 安装
+## 如果你想自己试
+
+下面是我自己装的步骤，照着做大概率能跑起来，但你的 vault 结构多半和我不一样，各张卡要读到内容，得按上面的格式表改 `config.json`、整理笔记。
 
 0. 需要：macOS（node 装在 `/opt/homebrew/bin` 或 `/usr/local/bin`）、Obsidian + [Dataview](https://github.com/blacksmithgu/obsidian-dataview) 插件（设置里打开 *Enable JavaScript queries*）。资讯卡另外需要 Node 18 以上，以及已登录的 [Claude Code](https://code.claude.com/docs/en/overview)。
 
@@ -103,7 +105,10 @@ node demo/make-demo.mjs
    ```sh
    cp _dashboard/config.example.json _dashboard/config.json
    ```
-3. 把 `_dashboard/examples/看板.md` 复制到 vault 根目录，在 Obsidian 里打开它就是看板。
+3. 把 `_dashboard/examples/看板.md` 复制到 vault 根目录，在 Obsidian 里打开它就是看板。`-n` 的意思是：根目录已经有一篇叫「看板」的笔记就不复制，不会覆盖它（那样的话自己换个名字再复制）。
+   ```sh
+   cp -n _dashboard/examples/看板.md ./看板.md
+   ```
 4. （资讯卡）写你自己的读者介绍，Claude 会按它判断「选题」和「学」：
    ```sh
    cp _dashboard/news/persona.example.md _dashboard/news/persona.md
@@ -118,7 +123,10 @@ node demo/make-demo.mjs
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.ai-dashboard-news.plist
    ```
 
-不装定时任务也行：看板打开时，如果数据不是今天的，而且已经过了 8:30，会自动在后台跑一次。卡片右上角的 ↻ 也能手动刷新。
+不装定时任务也行：卡片右上角的 ↻ 能手动更新。**第一次一定要自己点 ↻**，看板不会一打开就替你调用 Claude；抓过一次之后，看板打开时如果数据不是今天的、而且已经过了 8:30，会自动在后台补跑一次。
+
+- **没装 Claude Code**：其余卡照常用，资讯卡会写明「没找到 claude 命令」。用不上这张卡就在 `config.json` 里写 `"news": false`，整张卡和后台抓取都会关掉。想换成别的模型，改 `news/fetch.mjs` 里调用 `claude -p` 的那一段。
+- **同一台电脑上有好几个 vault 都装了看板**：资讯数据只有一份（`~/.secondbrain-news/`），大家共用。只想在一个 vault 里更新，其它 vault 的 `config.json` 写上 `"newsReadOnly": true`，它们就只显示、不更新。
 
 `config.json` 和 `news/persona.md` 已经写进 `.gitignore`，不会被提交。
 

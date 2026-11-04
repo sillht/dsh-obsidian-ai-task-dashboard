@@ -5,5 +5,6 @@
   "xhsDir": "xiaohongshu",
   "todoPath": "To-do & inspiration.md",
   "dailyTemplate": "templates/daily.md",
-  "weeklyTemplate": "templates/weekly.md"
+  "weeklyTemplate": "templates/weekly.md",
+  "news": true
 }
