@@ -927,7 +927,8 @@ function collectCarry(kind, cur) {
       if (!isFile(tfile(path))) continue;
       const day = collectDay(path);
       if (!day.total) continue;
-      const items = day.items.filter(t => !t.done && !have.has(plain(t.text)));
+      const seen = new Set(); // 同一条任务在那天的笔记里写了好几遍，只算一条
+      const items = day.items.filter(t => { const k = plain(t.text); if (t.done || have.has(k) || seen.has(k)) return false; seen.add(k); return true; });
       return { from: path, date: ymd(d), label: i === 1 ? "昨天" : `${d.getMonth() + 1}.${d.getDate()} `, items, to: cur.path };
     }
     return null;
@@ -977,6 +978,8 @@ async function appendUnder(kind, lines) {
 async function carryTasks(root, kind, D) {
   const c = D.carry && D.carry[kind]; if (!c || !c.items.length) return;
   const lines = c.items.map(t => `- [ ] ${String(t.text).trim()}`);
+  const target = kind === "today" ? `${V.dailyDir}/${ymd(TODAY)}.md` : `${V.weeklyDir}/${ymd(MON)}.md`; // 和 appendUnder 写的是同一篇
+  if (c.from === target) { new Notice("看板还停在旧的一天，没有接过来。关掉看板再打开后再点一次"); try { dv.index.touch(); } catch (e) { /* 忽略 */ } return; }
   optimisticAdd(root, kind, c.items.map(t => String(t.text)));
   await appendUnder(kind, lines);
   root.querySelectorAll(`.carry .lnk[data-act="carry-${kind}"]`).forEach(b => { b.closest(".carry").textContent = `接过来了 ${lines.length} 条`; });
@@ -1260,7 +1263,8 @@ async function main() {
   fresh.className = V.news === false ? "sb-board no-news" : "sb-board";
   fresh.innerHTML = renderAll(D);
   // 代码版本戳：view.js / view.css 改过之后，旧看板上绑的还是旧代码的处理函数，这时不能修补复用，必须整块换新
-  const ver = ["view.js", "view.css"].map(n => { const f = tfile(`${V.dir || "_dashboard"}/${n}`); return f && f.stat ? f.stat.mtime : 0; }).join("-");
+  // 日期也算进去：点击处理是第一次整块画时绑上的，记着那天的「今天」。跨了天还修补复用，接过来 / 加一条会写回昨天的笔记
+  const ver = ["view.js", "view.css"].map(n => { const f = tfile(`${V.dir || "_dashboard"}/${n}`); return f && f.stat ? f.stat.mtime : 0; }).join("-") + "-" + ymd(TODAY);
   fresh.dataset.sbVer = ver;
   const ghost = window.__sbNoMorph ? null : findGhost();
   if (ghost && ghost.dataset.sbVer === ver) {
