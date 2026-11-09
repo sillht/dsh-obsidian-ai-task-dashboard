@@ -26,12 +26,9 @@
 ├── dsh-obsidian-ai-task-dashboard/      ← 本仓库（代码）
 │   ├── view.js / view.css / debug.md
 │   ├── fonts/  news/  examples/  docs/
-│   ├── refresh.ps1                     ← ↻ 刷新入口
-│   └── bridge.ps1                      ← 双向桥接
+│   └── refresh.ps1                     ← ↻ 刷新入口
 └── demo-vault/                          ← 你的 vault（不提交，自己建或从备份恢复）
-    ├── 看板.md
-    ├── 给 dsh 的信.md
-    ├── 与 dsh 对话.md
+    ├── Dashboard.md                     ← 看板入口（dv.view("_dashboard")）
     └── _dashboard/                      ← 从仓库复制进来的
         ├── view.js / view.css / debug.md
         ├── fonts/  news/  config.json
@@ -39,7 +36,7 @@
 ```
 
 装进 vault 的 `_dashboard/` 就是把仓库里的 `view.js`、`view.css`、`debug.md`、`fonts/`、`news/`
-拷过去；`examples/` 里的三个 md（`看板.md`、`给 dsh 的信.md`、`与 dsh 对话.md`）拷到 vault 根目录。
+拷过去；`examples/Dashboard.md` 拷到 vault 根目录（作为看板入口）。
 
 ---
 
@@ -144,15 +141,14 @@ AGENS_API_KEY=你的密钥
 
 按顺序跑，每步都要通过：
 
-- [ ] 打开 Obsidian，打开 vault，打开 `看板.md`
+- [ ] 打开 Obsidian，打开 vault，打开 `Dashboard.md`
 - [ ] 7 张卡都有内容（不是空白/「没有数据」）
-- [ ] 打开 `给 dsh 的信.md`，在「## 我说」下加一行 `- 测试`，保存
+- [ ] 试着改一篇 `daily/` 里的待办，看板「今天」卡应立刻反映变化
 - [ ] 跑 `powershell -NoProfile -ExecutionPolicy Bypass -File refresh.ps1 -Async`
 - [ ] 等约 5~13 分钟，`_dashboard/news-data/today.json` 的 `generatedAt` 变新
 - [ ] 看板「今天 AI 圈」卡出现内容，点 ↻ 能刷新
 - [ ] **检查会话数**：`(Get-ChildItem "$env:USERPROFILE\.dsh\sessions" -Recurse -Directory -Filter 'session-*').Count` 刷新前后**不变**
 - [ ] **检查 projcache**：`(Get-ChildItem "$env:USERPROFILE\.dsh\storages\session_projcache\sessions").Count` 也**不变**
-- [ ] 双向：跑 `bridge.ps1 -Scan`，能看到你刚写的「测试」
 
 ---
 

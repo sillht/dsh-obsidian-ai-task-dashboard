@@ -1,5 +1,5 @@
 /* _dashboard/view.js — SecondBrain 看板 v1
-   由根目录 看板.md 的 dataviewjs 块调用：await dv.view("_dashboard")
+   由根目录 Dashboard.md 的 dataviewjs 块调用：await dv.view("_dashboard")
    dv = Dataview 行内 API；input.raw 为 true 时只打印数据（见 debug.md）。
    分三层：collect*（取数）→ render*（拼 HTML）→ bind（点击、打勾、记一笔、新建）。 */
 
@@ -19,7 +19,7 @@ const V = {
   news: true, // 资讯卡要用 dsh 的 headless 一次性任务做总结；用不上就在 config.json 里写 "news": false，整张卡和后台抓取都关掉
   row3: 640, // 第三行（资讯卡 + 番茄钟）的高度；前两行仍然撑满一屏，第三行往下滚才看到
 };
-// [A 方案适配] 演示文件不一定在 vault 根：所有相对路径都相对「看板.md 所在目录」解析。
+// [A 方案适配] 演示文件不一定在 vault 根：所有相对路径都相对「入口 md 所在目录」解析。
 // 前缀来源优先级：config.json 的 base（显式、最稳）> 从 dv.current() 自动推导 > 空（vault 根即看板所在目录）。
 // 例如 vault 根是 MyVault、看板在 Projects/demo-vault/ 下时，base 就是 "Projects/demo-vault"。
 let BOARD_DIR = "";
