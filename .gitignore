@@ -3,5 +3,12 @@ config.json
 news/persona.md
 .DS_Store
 
-# 演示 vault 是 demo/make-demo.mjs 生成的，不提交
+# 演示 vault（含真实笔记）不提交
 demo-vault/
+
+# dsh 版新增
+.env
+_backup-*/
+upstream/
+node_modules/
+*.log

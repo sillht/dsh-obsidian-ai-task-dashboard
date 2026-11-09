@@ -1,0 +1,12 @@
+# 统一的换行处理，避免跨平台 clone 后 .ps1 的 BOM/编码出问题
+* text=auto
+
+*.ps1   text eol=crlf
+*.md    text eol=lf
+*.json  text eol=lf
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.css   text eol=lf
+
+*.woff2 binary
+*.png   binary

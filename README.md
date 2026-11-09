@@ -1,151 +1,190 @@
-# obsidian-ai-dashboard
+# dsh-obsidian-ai-task-dashboard
 
-作为AI知识博主，这是我在 Obsidian 里用的个人看板。打开一个笔记，就能看到今天要做什么、这周的进度、AI相关内容的学习与工作进度，还有一张每天自动更新的「今天 AI 圈」资讯卡。
+[ziyu-llm/obsidian-ai-dashboard](https://github.com/ziyu-llm/obsidian-ai-dashboard) 的 **dsh 版**。
 
-![看板全貌](docs/board.png)
+原版用 macOS + Node + `claude -p` + launchd 刷新「今天 AI 圈」这张资讯卡。
+这个版本把底座换成 [DeepSeek Harness](https://github.com/deepseek-ai)（下称 dsh）的
+`headless` 一次性任务，全部跑在 Windows 上，去掉了 Node、Claude Code、launchd。
 
-<sub>截图里的待办、计划、灵感都是演示数据（`demo/make-demo.mjs` 生成）；资讯卡是真实的当天内容。</sub>
+> **想用原版？** 去上游。**想换 agent 底座、或者用 Windows？** 看这个。
 
-> **这是一份参考实现，不是装上就能用的插件。** 它按我自己的 vault 结构和习惯写，放出来是给大家看看这样一个看板是怎么做的：数据从哪读、卡片怎么画、资讯怎么自动整理、怎么不在电脑上越堆越多。可以读代码、拿思路，也可以自己改着用，但我不保证它在你的电脑上能直接跑起来，也没法逐个答疑。
+![看板](docs/board.png)
 
-## 先看效果：生成一个演示 vault
+<sub>截图为上游原版界面，本版视觉结构相同，仅资讯刷新底座不同。</sub>
 
-不想先整理自己的笔记，可以生成一个装满虚构内容的演示 vault，直接看效果：
+---
 
-```sh
-node demo/make-demo.mjs
+## 前提
+
+| 需要 | 说明 |
+|---|---|
+| Obsidian + [Dataview](https://github.com/blacksmithgu/obsidian-dataview) | Dataview 设置里必须打开 **Enable JavaScript queries** |
+| dsh 桌面应用 | **不是 npm 包**。装好后 `dsh --version` 有输出 |
+| 一份模型凭据 | 任意 OpenAI 兼容网关都行，下文以 agens 为例 |
+
+资讯卡之外的其他卡（今天 / 小红书 / 学习路线 / 本周 / 灵感 / 番茄钟）**不需要 dsh，也不需要密钥**，
+只要 Obsidian + Dataview 就能显示。
+
+---
+
+## 快速开始
+
+1. 装 Dataview，打开 JavaScript queries。
+2. 把仓库里的 `view.js`、`view.css`、`debug.md`、`fonts/`、`news/` 拷进 vault 的 `_dashboard/`；
+   把 `examples/` 里的 `看板.md`、`给 dsh 的信.md`、`与 dsh 对话.md` 拷到 vault 根目录。
+3. 复制 `config.example.json` 为 `_dashboard/config.json`，按需改字段（见下）。
+4. 在 Obsidian 里打开 `看板.md`。
+
+### 关于 `config.json`
+
+```json
+{
+  "dailyDir": "daily",
+  "weeklyDir": "weekly",
+  "planPath": "learning/plan.md",
+  "xhsDir": "xiaohongshu",
+  "todoPath": "To-do & inspiration.md",
+  "dailyTemplate": "templates/daily.md",
+  "weeklyTemplate": "templates/weekly.md",
+  "news": true,
+  "newsDir": "_dashboard/news-data"
+}
 ```
 
-它会在仓库里生成 `demo-vault/` 文件夹，在 Obsidian 里选「打开本地仓库」打开它（需要装 Dataview，见下面的安装第 0 步），再打开根目录的「看板」。日期按运行当天生成；隔天想让日期对上，加 `--refresh` 再跑一次。演示 vault 里的资讯卡只显示、不更新，不会用演示内容覆盖你自己的资讯数据。
-
-**这个脚本不删除任何文件**，也不碰你自己的笔记：它只往自己生成的文件夹里写，刷新时只覆盖它上次写的、之后没被改过的文件。演示库就是演示用的，请不要在里面写真实笔记。如果仓库放在某个 vault 里面（比如已经按下面的步骤装成了 `_dashboard`），它会拒绝在那里生成，请用 `--out=` 指定一个 vault 外面的空文件夹，比如 `node demo/make-demo.mjs --out=$HOME/ai-dashboard-demo`。
-
-## 有哪些卡
-
-| 卡片 | 读的是哪里 |
+| 字段 | 作用 |
 |---|---|
-| 今天 | `daily/` 里当天的日记，可以直接在卡上加待办、打勾 |
-| 小红书 | 创作文件夹里各个项目的进度，以及灵感文件里标了「下一期」的句子 |
-| AI 学习路线 | 一份按「第 N 周 · 标题」分段的学习计划，显示当前在第几站、总进度 |
-| 本周要完成 | 学习计划里当前这一块没勾的条目，加上 `weekly/` 里自己加的 |
-| 灵感收件箱 | 灵感文件末尾的几段，可以在卡上记一笔 |
-| 今天 AI 圈 | 每天 8:30 自动整理的 AI 资讯（下面细说）。**只有这张卡需要 Claude Code**，其余卡只靠 Obsidian + Dataview |
-| 番茄钟 | 25 分钟专注 / 5 分钟休息，到点系统通知 |
+| `base` | **可选**。当 `_dashboard/` 不在 vault 根目录时，填它相对 vault 的路径前缀（如 `"07-工作区/项目/demo-vault"`）。不填会自动尝试推导，推不出来就所有卡空白 |
+| `newsDir` | 资讯数据目录。原版把数据写在 vault 外的 `~/.secondbrain-news`，本版改到 vault 内，这样共享文件就能驱动看板 |
+| `news` | 设为 `false` 会关掉整张资讯卡和后台抓取 |
+| 其余 | 各卡读的目录/文件路径，相对 `base` |
 
-所有卡的内容都是打开看板时从你的笔记里现读的，代码里不存任何个人内容。
+> **不要**加 `newsReadOnly`。原版用它给演示库上只读锁，本版已移除；加了会把 ↻ 挡死。
 
-## 你的笔记要怎么写
+---
 
-看板不自带内容，只认下面这些格式。路径都能在 `config.json` 里改成你自己的；格式不对的卡会显示空状态（比如「今天还没定」），不会报错。演示库里的笔记就是现成的样例，照着写最快。
+## 资讯卡怎么刷新
 
-| 卡片 | `config.json` 里的设置（缺省值） | 看板认的格式 |
-|---|---|---|
-| 今天 | `dailyDir`（`daily`） | 文件名是日期，如 `2026-11-03.md`；里面有 `## 今日` 标题，下面是 `- [ ]` 待办 |
-| 本周要完成 | `weeklyDir`（`weekly`） | 文件名是这周一的日期；里面有 `## 本周要完成` 标题，下面是 `- [ ]` 待办 |
-| AI 学习路线 | `planPath`（`learning/plan.md`） | 用 `## 第 N 周 · 标题` 分站（最后一站可以写 `## 第 N 周起 · 标题`），每站下面是 `- [ ]` 条目；第一个还有没勾条目的站就是「当前站」 |
-| 小红书 | `xhsDir`（`xiaohongshu`） | 每个项目一个子文件夹；子文件夹里的 `README.md` 开头写 `status: 进行中` 这样的属性，状态里不含「完成」「归档」「done」这类字样的算进行中；最近 30 天改过的项目（最多 3 个）显示成下面的标签 |
-| 灵感收件箱 | `todoPath`（`To-do & inspiration.md`） | 空行分段，一段一条灵感；段落第一行可以是日期（`10.28` 或 `2026-10-30 · 内容`）；含「下一期」三个字的行显示在小红书卡的「打算做」 |
-| 按模板新建 | `dailyTemplate` / `weeklyTemplate`（`templates/daily.md`、`templates/weekly.md`） | 今天或本周的文件还没建时，卡上的「新建」按钮用它当模板 |
+点「今天 AI 圈」卡片右上角的 ↻：
 
-一个最小的日记文件长这样：
+```
+Obsidian ↻ → view.js runNews() → refresh.ps1 -Async → dsh headless（一次性任务）
+  → 用 dsh 的 web_fetch 抓 HN / X / 播客 / YouTube
+  → 让模型按 JSON Schema 总结成中文
+  → 写回 vault 内的 news-data/today.json
+  → view.js 的 fs.watch 检测到变化，自动重画
+```
+
+手动跑（同步，会等它跑完并输出结果）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File refresh.ps1 -Vault "C:\你的\vault" -Async
+```
+
+> **必须用 `-ExecutionPolicy Bypass`**，直接 `& refresh.ps1` 会被执行策略拦住。
+
+### 需要先配好 dsh
+
+1. 装 anysearch 插件（抓 YouTube 必需）：
+   ```powershell
+   dsh plugin --profile headless add @anysearch/anysearch-dsh
+   ```
+2. 在 `~/.dsh/profiles/headless/cordis.patch.yml` 里恢复三个被 headless 模板禁用的服务：
+   ```yaml
+   - id: credentials
+     disabled: false
+   - id: authorization
+     disabled: false
+   - id: deepseek-account
+     disabled: false
+   ```
+   漏了会报 `configured web provider "anysearch" is not registered`，YouTube 抓不到。
+3. 配 provider 与默认模型（`llm-pi-ai` + `agent-default-model`），**只写环境变量名不写密钥**。
+4. 把密钥放进 `~/.dsh/.env`：`AGENS_API_KEY=你的密钥`。
+
+完整步骤和排错表见 **[RESTORE.md](RESTORE.md)**。
+
+---
+
+## 双向：在 Obsidian 里给 dsh 留言
+
+不需要插件、不需要端口。打开 `给 dsh 的信.md`，在「## 我说」下写一行：
 
 ```markdown
-## 今日
-
-- [ ] 读完一篇讲 RAG 的长文
-- [ ] 剪下一期视频的开头
+- 帮我看看今天还剩几件事
+- 待办：把复盘写完
 ```
 
-## 「今天 AI 圈」怎么来的
+然后：
 
-```
-每天 8:30（macOS launchd 定时任务）
-  → node news/fetch.mjs
-     ① 抓：9 个 YouTube AI 博主的频道页、follow-builders 整理的 X 和播客数据、Hacker News 首页的 AI 帖子和热门评论
-     ② 只把新内容交给 Claude Code（claude -p）总结，已经总结过的直接沿用
-     ③ 写到 ~/.secondbrain-news/today.json
-  → 看板打开时读这个文件画卡，看板本身不联网
-```
+```powershell
+# 1) 扫出还没回复的消息
+powershell -NoProfile -ExecutionPolicy Bypass -File bridge.ps1 -Vault "C:\你的\vault" -Scan
 
-卡上分四块：
-
-- **要闻**：把几个来源讲同一件事的内容合并成一条，按「几个来源在聊」排序，挑 3–5 件。
-- **YouTube 博主在做什么**：每条视频一句话讲了什么，播放量明显高于该频道平时的标「爆」。
-- **X 上大家在聊什么**：按话题归纳，附原推链接。
-- **Hacker News 工程师圈**：这是什么、工程师角度的要点、评论区在争什么。
-
-![资讯卡展开](docs/news-detail.png)
-
-标签含义：`新` 是 30 天内第一次出现的话题，`✦ 选题` 是能做成视频的，`学` 是值得作为工程师去学的。「选题」「学」按 `news/persona.md` 里写的读者背景判断。
-
-### 不会越堆越多的本地数据
-
-这是我最在意的一点，所以单独说：
-
-- 数据只写在 vault 外的 `~/.secondbrain-news/`，每天覆盖。代码里给每个字段和条目数都设了上限，整个文件夹封顶 200KB（实际约 20KB），超了会自动删最旧的。
-- 原始网页、评论都只在内存里处理，不落盘。
-- 调用 Claude 时加了 `--no-session-persistence`（不存对话记录）和 `--strict-mcp-config`（不连其它连接器，否则每次会多留两份日志）。
-- YouTube 缩略图下载到内存里显示，不进 Obsidian 的网页缓存。
-- 运行日志只留最后 200 行；定时任务的输出直接丢弃。
-
-我在自己电脑上完整跑过一次，扫描了运行期间整个用户目录新增的文件，确认没有会累积的东西。
-
-## 如果你想自己试
-
-下面是我自己装的步骤，照着做大概率能跑起来，但你的 vault 结构多半和我不一样，各张卡要读到内容，得按上面的格式表改 `config.json`、整理笔记。
-
-0. 需要：macOS（node 装在 `/opt/homebrew/bin` 或 `/usr/local/bin`）、Obsidian + [Dataview](https://github.com/blacksmithgu/obsidian-dataview) 插件（设置里打开 *Enable JavaScript queries*）。资讯卡另外需要 Node 18 以上，以及已登录的 [Claude Code](https://code.claude.com/docs/en/overview)。
-
-1. 把这个仓库放进你的 vault，文件夹名必须叫 `_dashboard`：
-   ```sh
-   cd /path/to/your-vault
-   git clone https://github.com/ziyu-llm/obsidian-ai-dashboard.git _dashboard
-   ```
-2. 复制一份设置，改成你 vault 里的真实路径：
-   ```sh
-   cp _dashboard/config.example.json _dashboard/config.json
-   ```
-3. 把 `_dashboard/examples/看板.md` 复制到 vault 根目录，在 Obsidian 里打开它就是看板。`-n` 的意思是：根目录已经有一篇叫「看板」的笔记就不复制，不会覆盖它（那样的话自己换个名字再复制）。
-   ```sh
-   cp -n _dashboard/examples/看板.md ./看板.md
-   ```
-4. （资讯卡）写你自己的读者介绍，Claude 会按它判断「选题」和「学」：
-   ```sh
-   cp _dashboard/news/persona.example.md _dashboard/news/persona.md
-   ```
-   先手动跑一次，确认能出结果：
-   ```sh
-   node _dashboard/news/fetch.mjs
-   ```
-5. （资讯卡）装每天 8:30 的定时任务：打开 `launchd/com.example.ai-dashboard-news.plist`，把 `__HOME__` 和 `__VAULT__` 换成你的路径，然后：
-   ```sh
-   cp _dashboard/launchd/com.example.ai-dashboard-news.plist ~/Library/LaunchAgents/
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.ai-dashboard-news.plist
-   ```
-
-不装定时任务也行：卡片右上角的 ↻ 能手动更新。**第一次一定要自己点 ↻**，看板不会一打开就替你调用 Claude；抓过一次之后，看板打开时如果数据不是今天的、而且已经过了 8:30，会自动在后台补跑一次。
-
-- **没装 Claude Code**：其余卡照常用，资讯卡会写明「没找到 claude 命令」。用不上这张卡就在 `config.json` 里写 `"news": false`，整张卡和后台抓取都会关掉。想换成别的模型，改 `news/fetch.mjs` 里调用 `claude -p` 的那一段。
-- **同一台电脑上有好几个 vault 都装了看板**：资讯数据只有一份（`~/.secondbrain-news/`），大家共用。只想在一个 vault 里更新，其它 vault 的 `config.json` 写上 `"newsReadOnly": true`，它们就只显示、不更新。
-
-`config.json` 和 `news/persona.md` 已经写进 `.gitignore`，不会被提交。
-
-## 卸载
-
-```sh
-launchctl bootout gui/$(id -u)/com.example.ai-dashboard-news
-rm ~/Library/LaunchAgents/com.example.ai-dashboard-news.plist
-rm -r ~/.secondbrain-news
+# 2) 让 dsh 读 Scan 输出并作答，写成 reply.json（格式见下），再应用回写
+powershell -NoProfile -ExecutionPolicy Bypass -File bridge.ps1 -Vault "C:\你的\vault" `
+  -Apply -ReplyFile reply.json
 ```
 
-再删掉 vault 里的 `_dashboard` 文件夹和 `看板.md`。
+`reply.json` 格式：
 
-## 致谢
+```json
+[
+  { "q": "与「我说」原文完全一致的问题",
+    "a": "dsh 的回复",
+    "todos": ["可选：加进今天日记的待办"] }
+]
+```
 
-- X 和播客数据来自 [follow-builders](https://github.com/zarazhangrui/follow-builders)
-- Hacker News 数据来自 [HN Algolia API](https://hn.algolia.com/api)
-- 字体 [Doto](https://github.com/oliverlalan/Doto) 和 [Space Mono](https://github.com/googlefonts/spacemono)，SIL Open Font License 1.1，授权文件在 `fonts/`
+`与 dsh 对话.md` 会把回复整理成对话视图。`待办：` 开头的输入会变成看板「今天」卡的一条待办。
 
-## License
+> 这是**轮询式**（你叫它才跑），不是秒级实时。要近实时得自己写 dsh Host 插件。
 
-代码按 [MIT](LICENSE) 授权。
+---
+
+## 相对上游改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `view.js` | ① `NEWS_DIR()` 支持 `config.json` 的 `newsDir`，把资讯数据从 vault 外的 macOS 路径改到 vault 内；② 新增路径前缀机制 `BOARD_DIR` / `P()`，让 `_dashboard` 不在 vault 根时也能正确取数；③ `loadThumbs()` 跳过空 `data-thumb`；④ `runNews()` 从「spawn node 跑 fetch.mjs 再调 claude -p」改为「spawn refresh.ps1 → dsh headless」；⑤ 移除 `maybeAutoNews()` 的只读短路 |
+| `refresh.ps1` | **新增**。↻ 的入口，把任务通过 stdin 交给 `dsh headless -`，并负责清理本次产生的会话 |
+| `bridge.ps1` | **新增**。双向搬运（Scan / Apply） |
+| `examples/给 dsh 的信.md`、`examples/与 dsh 对话.md` | **新增**。双向界面模板 |
+| `config.example.json` | 加 `newsDir`；`base` 说明见上；移除 `newsReadOnly` |
+| `LICENSE` | MIT，加一行本版版权 |
+| 删除 | `launchd/`（macOS 定时任务）、`sync.sh`（macOS 复制脚本）、`demo/`（演示库生成器，与我们的 config 不兼容） |
+| 保留原样 | `view.css`、`debug.md`、`fonts/`、`news/fetch.mjs`（仅作 SCHEMA 参考，不执行）、`news/persona.example.md`、`examples/看板.md`、`docs/` |
+
+---
+
+## 踩过的坑
+
+这几条是这次适配真正花时间的地方，换台机器重新搭也会再遇到：
+
+1. **`dsh headless` 每次调用必然新建一个会话**，官方没有 ephemeral / 不落盘模式。
+   所以 `refresh.ps1` 在启动前记录 `~/.dsh/sessions` 快照，跑完由后台守护按差集删掉新增的。
+2. **删除必须按快照差集，不能按目录名猜**。headless 的 cwd 变化会让会话落到不同工作区目录。
+3. **`$psi.WorkingDirectory` 必须显式设置**，否则会话归属到错误工作区，GUI 里出现「未分组」。
+4. **删了会话目录，投影缓存不会跟着删**。`~/.dsh/storages/session_projcache/sessions/<id>.json`
+   会留成孤儿（每条约 7 KB），每次刷新加一条，永久累积。所以清理时要连带删。
+5. **抓 YouTube 必须换 anysearch**。dsh headless 默认的 `web_fetch` 是裸 HTTP、无浏览器指纹，
+   频道页会 `TypeError: fetch failed`。换 anysearch 后还要恢复 `credentials` 等三个服务。
+6. **`.ps1` 必须 UTF-8 带 BOM**。否则 PowerShell 5.1 按 GBK 解码，中文全乱、直接解析失败。
+
+---
+
+## 已知限制
+
+- 资讯卡单次刷新**约 5~13 分钟**（取决于网络和模型），慢在 dsh headless 冷启动 + 四个源抓取，不是模型慢。
+- 抓取可能部分失败，失败那部分会沿用未过期的旧条目，并在 `today.json` 的 `sources` / `_note` 里如实写明，不会中断。
+- 双向是**轮询式**，不是实时。
+- 两边同时编辑同一篇笔记有冲突风险（共享文件即接口的固有代价）。
+- 资讯卡数据来自 HN Algolia、follow-builders、YouTube 频道页；中文意译和「选题/学」判断由模型撰写，可能有偏差。
+- 未提供任何定时任务。想每天自动跑，自己用 dsh 的 `schedule_create` 或 Windows 计划任务触发 `refresh.ps1`。
+
+---
+
+## 许可
+
+MIT。原版版权 `Copyright (c) 2026 ziyu-llm`，本版改动版权 `Copyright (c) 2026 sillht`，详见 [LICENSE](LICENSE)。
+
+上游：[ziyu-llm/obsidian-ai-dashboard](https://github.com/ziyu-llm/obsidian-ai-dashboard)

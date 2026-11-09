@@ -6,5 +6,6 @@
   "todoPath": "To-do & inspiration.md",
   "dailyTemplate": "templates/daily.md",
   "weeklyTemplate": "templates/weekly.md",
-  "news": true
+  "news": true,
+  "newsDir": "_dashboard/news-data"
 }

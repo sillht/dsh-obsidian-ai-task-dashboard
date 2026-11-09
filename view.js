@@ -19,7 +19,25 @@ const V = {
   news: true, // 资讯卡要用已登录的 Claude Code 做总结；用不上就在 config.json 里写 "news": false，整张卡和后台抓取都关掉
   row3: 640, // 第三行（资讯卡 + 番茄钟）的高度；前两行仍然撑满一屏，第三行往下滚才看到
 };
-try { Object.assign(V, JSON.parse(await app.vault.adapter.read(`${V.dir || "_dashboard"}/config.json`))); } catch (e) { /* 没有 config.json 就用缺省值 */ }
+// [A 方案适配] 演示文件不一定在 vault 根：所有相对路径都相对「看板.md 所在目录」解析。
+// 前缀来源优先级：config.json 的 base（显式、最稳）> 从 dv.current() 自动推导 > 空（vault 根即看板所在目录）。
+// 例如 vault 根是 MyVault、看板在 Projects/demo-vault/ 下时，base 就是 "Projects/demo-vault"。
+let BOARD_DIR = "";
+try {
+  const cp = dv.current()?.file?.path || "";
+  const i = cp.lastIndexOf("/");
+  if (i >= 0) BOARD_DIR = cp.slice(0, i + 1);
+} catch (e) { /* 忽略 */ }
+// 先读一次 config（此时用推导出的前缀），拿到 base 后覆盖，再重新按最终前缀读一次
+const readCfg = async () => {
+  try { return JSON.parse(await app.vault.adapter.read(BOARD_DIR + "_dashboard/config.json")); } catch (e) { return {}; }
+};
+let cfg = await readCfg();
+if (typeof cfg.base === "string" && cfg.base.length) { BOARD_DIR = cfg.base.replace(/\/?$/, "/"); cfg = await readCfg(); }
+const P = rel => BOARD_DIR + String(rel || "").replace(/^\/+/, "");
+Object.assign(V, cfg);
+const KEYS = ["dailyDir", "weeklyDir", "planPath", "xhsDir", "todoPath", "dailyTemplate", "weeklyTemplate", "fontDir", "newsDir"];
+for (const k of KEYS) if (typeof V[k] === "string") V[k] = P(V[k]);
 if (V.news === false) V.row3 = 440; // 没有资讯卡，第三行只剩番茄钟，压矮（和 view.css 的 .no-news 对应）
 const baseName = p => String(p).split("/").pop().replace(/\.md$/, "");
 
@@ -222,15 +240,25 @@ async function collectTodo() {
     urls: [...text.matchAll(/https?:\/\/[^\s)）]+/g)].map(m => m[0]) }; // 资讯卡据此判断哪条已经「收进灵感」
 }
 
-// 资讯卡：读 _dashboard/news/fetch.mjs 每天写在 vault 外的 today.json（方案 §13）。看板自己不联网
-const NEWS_DIR = () => window.require("path").join(window.require("os").homedir(), ".secondbrain-news");
+// 资讯卡：读 today.json。看板自己不联网。
+// [A 方案适配] 优先用 config.json 的 newsDir（相对 vault 根，数据由 dsh 直接写进 vault）；
+// 未配置时回退到原仓库行为：~/.secondbrain-news/。这样 Windows / 无 Node 环境也能跑。
+const NEWS_DIR = () => {
+  const path = window.require("path");
+  if (V.newsDir) {
+    const base = app.vault.adapter.basePath;
+    if (base) return path.join(base, V.newsDir);
+  }
+  return path.join(window.require("os").homedir(), ".secondbrain-news");
+};
 // 缩略图不用 <img src=网址> 直接加载：那样会存进 Obsidian 的网页缓存（在磁盘上，满 1.25GB 左右才清）。
 // 改用 Node 下载到内存、做成 blob 地址给图片用，关掉 Obsidian 就没了，磁盘上不留
 const thumbMap = () => window.__sbThumbs || (window.__sbThumbs = new Map()); // 原网址 → blob 地址（加载中是 null）
 const thumbSrc = url => { const b = thumbMap().get(url); return typeof b === "string" ? b : ""; };
 function loadThumbs() {
   const map = thumbMap();
-  const want = [...new Set([...document.querySelectorAll(".sb-board img[data-thumb]")].map(i => i.dataset.thumb))];
+  // [A 方案适配] 跳过空地址，离线演示时不发起无意义的网络请求
+  const want = [...new Set([...document.querySelectorAll(".sb-board img[data-thumb]")].map(i => i.dataset.thumb).filter(Boolean))];
   for (const url of want) {
     if (map.has(url)) continue;
     map.set(url, null);
@@ -515,19 +543,42 @@ async function saveNews(root, D, btn) {
   await app.vault.process(f, data => data.replace(/\s+$/, "") + `\n\n${ymd(TODAY)} · ${text}\n`);
 }
 
-// 跑一次抓取脚本（刷新按钮 / 数据不是今天的时自动补跑）。跑完 today.json 一变，下面的文件监视会让看板重画
-const NODE_BIN = () => ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"].find(p => { try { return window.require("fs").existsSync(p); } catch (e) { return false; } });
+// 跑一次刷新（刷新按钮 / 数据不是今天的时自动补跑）。跑完 today.json 一变，下面的文件监视会让看板重画。
+// [A 方案适配] 上游原实现是 spawn node 去跑 fetch.mjs 再调 claude -p，强依赖 macOS + Node + Claude Code。
+// 这里改为 spawn 同目录下的 refresh.ps1，由它去调 dsh headless（一次性任务）完成抓取+总结+写回。
+// 不依赖系统 Node、不需要 Claude Code、凭据固定在 ~/.dsh/.env。
+// [A 方案适配] 关键：用户实际打开的 vault 根可能是更上层目录（例如 vault 根是 MyVault、看板在 Projects/demo-vault/），
+// app.vault.adapter.basePath 返回的是那个根，不是 demo-vault。
+// BOARD_DIR 是 config.json 的 base 前缀（vault 相对路径，指向 demo-vault），
+// 用 basePath + BOARD_DIR 才能得到 demo-vault 的绝对路径。
+const BOARD_ABS = () => {
+  const path = window.require("path");
+  const base = app.vault.adapter.basePath;
+  if (!base) return null;
+  return BOARD_DIR ? path.resolve(base, BOARD_DIR) : base;
+};
+const RUN_REFRESH = () => {
+  const fs = window.require("fs"), path = window.require("path");
+  const board = BOARD_ABS();
+  if (!board) return null;
+  // refresh.ps1 在 demo-vault 上一层，也在 _dashboard/ 下放一份兜底
+  const candidates = [
+    path.join(board, "_dashboard", "refresh.ps1"),
+    path.join(board, "..", "refresh.ps1"),
+  ];
+  return candidates.find(p => { try { return fs.existsSync(p); } catch (e) { return false; } }) || null;
+};
 function runNews(root) {
-  // 演示库（config.json 里 newsReadOnly: true）只显示资讯、不更新，免得用演示版读者介绍覆盖真实数据
-  if (V.newsReadOnly) { if (typeof Notice === "function") new Notice("这个库只显示资讯，不更新"); return; }
-  const node = NODE_BIN(), base = app.vault.adapter.basePath;
-  if (!node || !base) { new Notice("没找到 node，没法更新资讯（要装在 /opt/homebrew/bin 或 /usr/local/bin）"); return; }
-  const home = window.require("os").homedir();
-  const p = window.require("child_process").spawn(node, [`${base}/_dashboard/news/fetch.mjs`], {
-    cwd: base, stdio: "ignore", env: { ...window.process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${home}/.local/bin` } });
-  p.on("close", () => { try { dv.index.touch(); } catch (e) { /* 忽略 */ } });
-  p.on("error", e => console.warn("[sb-board] 资讯更新失败", e));
+  const script = RUN_REFRESH(), board = BOARD_ABS();
+  if (!script || !board) { if (typeof Notice === "function") new Notice("找不到 refresh.ps1，无法更新资讯"); return; }
+  const p = window.require("child_process").spawn(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Async", "-Vault", board],
+    { cwd: board, stdio: "ignore", windowsHide: true }
+  );
+  p.on("error", e => console.warn("[sb-board] 资讯刷新启动失败", e));
   root.querySelectorAll(".news .upd").forEach(u => { u.className = "upd run"; u.textContent = "正在更新…"; });
+  if (typeof Notice === "function") new Notice("已开始刷新资讯，几十秒后看板会自动重画");
 }
 // 盯着数据文件夹：定时任务或刷新按钮写完 today.json，看板自己重画（只装一个监视器，代码更新后换新的）
 function watchNews() {
@@ -547,7 +598,7 @@ function watchNews() {
 function maybeAutoNews(root, N) {
   const now = new Date(), day = ymd(TODAY);
   // 一次都没抓过（新装的）不自动跑：第一次要自己点 ↻，免得一打开看板就替人花一次 Claude 用量
-  if (V.news === false || V.newsReadOnly || !N.t || N.running || N.t.date === day || window.__sbNewsAuto === day) return;
+  if (V.news === false || !N.t || N.running || N.t.date === day || window.__sbNewsAuto === day) return;
   if (now.getHours() * 60 + now.getMinutes() < 8 * 60 + 30) return;
   window.__sbNewsAuto = day;
   runNews(root);
@@ -1264,7 +1315,7 @@ async function main() {
   fresh.innerHTML = renderAll(D);
   // 代码版本戳：view.js / view.css 改过之后，旧看板上绑的还是旧代码的处理函数，这时不能修补复用，必须整块换新
   // 日期也算进去：点击处理是第一次整块画时绑上的，记着那天的「今天」。跨了天还修补复用，接过来 / 加一条会写回昨天的笔记
-  const ver = ["view.js", "view.css"].map(n => { const f = tfile(`${V.dir || "_dashboard"}/${n}`); return f && f.stat ? f.stat.mtime : 0; }).join("-") + "-" + ymd(TODAY);
+  const ver = ["view.js", "view.css"].map(n => { const f = tfile(P(`_dashboard/${n}`)); return f && f.stat ? f.stat.mtime : 0; }).join("-") + "-" + ymd(TODAY);
   fresh.dataset.sbVer = ver;
   const ghost = window.__sbNoMorph ? null : findGhost();
   if (ghost && ghost.dataset.sbVer === ver) {
