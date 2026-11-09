@@ -16,7 +16,7 @@ const V = {
   finishedDays: 30,
   ideasMax: 4,
   narrowBelow: 760,
-  news: true, // 资讯卡要用已登录的 Claude Code 做总结；用不上就在 config.json 里写 "news": false，整张卡和后台抓取都关掉
+  news: true, // 资讯卡要用 dsh 的 headless 一次性任务做总结；用不上就在 config.json 里写 "news": false，整张卡和后台抓取都关掉
   row3: 640, // 第三行（资讯卡 + 番茄钟）的高度；前两行仍然撑满一屏，第三行往下滚才看到
 };
 // [A 方案适配] 演示文件不一定在 vault 根：所有相对路径都相对「看板.md 所在目录」解析。
@@ -485,12 +485,12 @@ function cardNews(D) {
   const N = D.news, t = N.t || {};
   const tools = `<span class="tools"><button class="tb" data-act="news-refresh" title="现在就更新（约 1 分钟）">↻</button><button class="tb" data-act="expand" title="展开">${SVG_EXPAND}</button><button class="tb" data-act="more" title="更多">⋯</button></span>`;
   const empty = msg => `<div class="muted">${msg}</div>`;
-  // 没抓成功过时把原因直接写在卡上（不只是鼠标悬停才看得到）；没装 Claude Code 是最常见的一种，单独说怎么办
-  const fail = t.lastError ? (/找不到 claude/.test(t.lastError.message)
-    ? `这张卡要用已登录的 Claude Code 做总结，这台电脑上没找到 claude 命令。用不上这张卡的话，在 _dashboard/config.json 里写 "news": false 把它关掉`
+  // 没抓成功过时把原因直接写在卡上（不只是鼠标悬停才看得到）；找不到 dsh 是最常见的一种，单独说怎么办
+  const fail = t.lastError ? (/找不到 dsh|dsh CLI/.test(t.lastError.message)
+    ? `这张卡要用 dsh 的一次性任务（dsh headless）做总结，这台电脑上没找到 dsh 命令。用不上这张卡的话，在 _dashboard/config.json 里写 "news": false 把它关掉；想用这张卡，见 RESTORE.md 的「让脚本找到 dsh」一节`
     : `上次更新失败：${esc(t.lastError.message)}`) : "";
   const heads = (t.headlines || []).length ? `<ol class="heads">${t.headlines.map((h, k) => headItem(t, h, k, false)).join("")}</ol>`
-    : empty(N.running ? "正在第一次抓取，大约 1 分钟" : fail || "还没有数据。点右上角 ↻ 抓一次（要用已登录的 Claude Code，大约 1 分钟）");
+    : empty(N.running ? "正在第一次抓取，大约 1 分钟" : fail || "还没有数据。点右上角 ↻ 抓一次（要用 dsh headless，大约 1 分钟）");
   const yt = (t.youtube || []).map(v => ytItem(D, v, false)).join("");
   const xs = ((t.x && t.x.topics) || []).map(x => xItem(D, x, false)).join("");
   const pods = (t.podcasts || []).filter(p => p.gist).map(p => `<li class="ni pod" data-url="${esc(p.url)}"><div class="nb"><div class="nt">${esc(p.title_zh || p.title)}${marks(p)}</div><div class="nm">播客 · ${esc(p.name)}</div></div></li>`).join("");
@@ -597,7 +597,7 @@ function watchNews() {
 // 数据不是今天的、已经过了 8:30、没在跑：自动补跑一次（Mac 关机错过定时任务时）。同一天只试一次
 function maybeAutoNews(root, N) {
   const now = new Date(), day = ymd(TODAY);
-  // 一次都没抓过（新装的）不自动跑：第一次要自己点 ↻，免得一打开看板就替人花一次 Claude 用量
+  // 一次都没抓过（新装的）不自动跑：第一次要自己点 ↻，免得一打开看板就替人花一次模型用量
   if (V.news === false || !N.t || N.running || N.t.date === day || window.__sbNewsAuto === day) return;
   if (now.getHours() * 60 + now.getMinutes() < 8 * 60 + 30) return;
   window.__sbNewsAuto = day;
